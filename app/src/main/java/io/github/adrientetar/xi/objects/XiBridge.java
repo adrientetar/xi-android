@@ -147,6 +147,10 @@ public class XiBridge {
         this.watcher.interrupt();
     }
 
+    public void finish() {
+        this.process.destroy();
+    }
+
     /* Send */
 
     private void send(JSONObject root) {
@@ -334,14 +338,18 @@ class WatcherThread extends Thread {
                 /* We use ready() here instead of blocking on readLine() so the thread can check
                  * if it's getting interrupted. */
                 // XXX: this polls the shit out of the buffer and heats up CPU. find another way
-                if (true) {//this.reader.ready()) {
+                if (this.reader.ready()) {
                     this.line = this.reader.readLine();
                     message = Message.obtain();
                     message.obj = this.line;
                     this.handler.sendMessage(message);
+                } else {
+                    this.sleep(100);
                 }
             } catch (IOException e) {
                 Log.e("Xi", "IO error in Watcher.");
+                e.printStackTrace();
+            } catch (InterruptedException e) {
                 e.printStackTrace();
             }
         }

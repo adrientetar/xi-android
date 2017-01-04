@@ -29,12 +29,18 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        //this.bridge.activateWatcher();
+        this.bridge.activateWatcher();
     }
 
     @Override
     protected void onPause() {
         super.onPause();
-        //this.bridge.deactivateWatcher();
+        this.bridge.deactivateWatcher();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        this.bridge.finish();
     }
 }
