@@ -2,7 +2,6 @@ package io.github.adrientetar.xi;
 
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
-import android.util.Log;
 
 import io.github.adrientetar.xi.objects.XiBridge;
 import io.github.adrientetar.xi.widgets.XiView;

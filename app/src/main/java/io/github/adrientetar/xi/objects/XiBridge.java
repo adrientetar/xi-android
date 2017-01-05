@@ -149,6 +149,7 @@ public class XiBridge {
 
     public void finish() {
         this.process.destroy();
+        this.watcher.interrupt();
     }
 
     /* Send */

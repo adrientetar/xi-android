@@ -44,7 +44,7 @@ import io.github.adrientetar.xi.objects.XiBridge;
 
 public class XiView extends View {
     // Bridge
-    private XiBridge bridge;
+    private XiBridge bridge = null;
     private String tab;
     // TextView
     private TextKeyListener listener;
@@ -53,7 +53,7 @@ public class XiView extends View {
     private int totalLines = 0;
     private int cursorLine = 0;
     private SpannableString cursorText;
-    private int yOffset = 0;
+    private float yOffset = 0;
     // Drawing
     private final Paint highlightPaint;
     private final TextPaint textPaint;
@@ -70,6 +70,7 @@ public class XiView extends View {
     public XiView(Context context, @Nullable AttributeSet attrs, int defStyleAttr) {
         super(context, attrs, defStyleAttr);
         this.setFocusable(true);
+        this.setVerticalScrollBarEnabled(true);
 
         this.textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         this.textPaint.density = this.getResources().getDisplayMetrics().density;
@@ -84,6 +85,8 @@ public class XiView extends View {
         this.highlightPaint.setStyle(Paint.Style.STROKE);
 
         this.highlightPath = new Path();
+
+        this.lines = new StaticLayout[this.getHeight() / this.getLineHeight() + 2]; // TODO: init to null
     }
 
     @TargetApi(Build.VERSION_CODES.LOLLIPOP)
@@ -125,9 +128,6 @@ public class XiView extends View {
                 int totalLines = update.getInt("height");
                 if (totalLines != this.totalLines) {
                     this.totalLines = totalLines;
-                    Log.v("Xi", "[Core] Height changed " + this.totalLines);
-                    Log.v("Xi", "[View] Resizing lines arr: " + this.lines.length + " -> " + this.totalLines);
-                    this.lines = Arrays.copyOf(this.lines, this.totalLines);
                     this.requestLayout();
                 }
             }
@@ -144,7 +144,6 @@ public class XiView extends View {
                 }
                 if (value != -1) {
                     this.setScrollY(value);
-                    Log.v("Xi", "[Core] scrollto: " + scrollToLine + " :: value: " + value);
                 }
             }
         } catch (JSONException e) {
@@ -153,7 +152,6 @@ public class XiView extends View {
     }
 
     private void updateLines(int firstLine, JSONArray lines) {
-        Log.v("Xi", "[Core] updateLines: " + firstLine + " " + lines.length());
         int start = Math.max(this.firstLine, firstLine);
         int end = Math.min(this.firstLine + this.lines.length, firstLine + lines.length());
         int selStart = -1;
@@ -170,11 +168,11 @@ public class XiView extends View {
                     JSONArray annotation = line.getJSONArray(j);
                     switch (annotation.getString(0)) {
                         case "cursor":
-                            if (selStart != -1) {
-                                Log.w("Xi", "selStart is set " + (selStart == annotation.getInt(1)));
+                            if (selEnd != -1) {
+                                Log.w("Xi", "selStart is set " + (selEnd == annotation.getInt(1)));
                             } else {
-                                this.cursorLine = i;
-                                selStart = annotation.getInt(1);
+                                this.cursorLine = i - start;
+                                selEnd = annotation.getInt(1);
                             }
                             break;
                         case "fg":
@@ -196,17 +194,16 @@ public class XiView extends View {
                 e.printStackTrace();
                 return;
             }
-            if (selEnd == -1) {
-                selEnd = selStart;
+            if (selStart == -1) {
+                selStart = selEnd;
             }
-            if (selStart != -1) {
-                Selection.setSelection(
-                        builder, selStart, selEnd);
+            if (selEnd != -1) {
+                Selection.setSelection(builder, selStart, selEnd);
             }
             text = SpannableString.valueOf(builder);
             this.lines[i-this.firstLine] = new StaticLayout(
                     text, this.textPaint, wantWidth, Layout.Alignment.ALIGN_NORMAL, 1, 0, false);
-            if (this.cursorLine == i) {
+            if (this.cursorLine == (i - start)) {
                 this.cursorText = text;
             }
             builder.clear();
@@ -285,22 +282,21 @@ public class XiView extends View {
         super.onDraw(canvas);
 
         // this will undo Y scroll offset
-        //canvas.translate(0, this.getScrollY());
-        // TODO: if we got a Scroller we don't even need to setScrollY().
-
-        int baseline = this.getBaseline();
-        int lineHeight = this.getLineHeight();
+        canvas.translate(0, this.getScrollY());
+        // apply offset between the first tile and viewport
         canvas.translate(0, this.yOffset);
 
+        int lineHeight = this.getLineHeight();
         int i = 0;
-        Log.v("Xi", "[View] Paint: " + this.lines.length);
         for (StaticLayout layout: this.lines) {
             if (layout == null) {
+                i += 1;
                 continue;
             }
             if (i == this.cursorLine) {
                 int selStart = Selection.getSelectionStart(this.cursorText);
                 // TODO: make a function for this
+                // XXX: selection doesn't necessarily happen only on the cursor line
                 int selEnd = Selection.getSelectionEnd(this.cursorText);
                 if (selStart == selEnd) {
                     this.highlightPaint.setStyle(Paint.Style.STROKE);
@@ -308,10 +304,11 @@ public class XiView extends View {
                     this.highlightPaint.setStyle(Paint.Style.FILL);
                 }
                 layout.getCursorPath(selStart, this.highlightPath, this.cursorText);
+            } else {
+                this.highlightPath.reset();
             }
             layout.draw(canvas, this.highlightPath, this.highlightPaint, 0);
             canvas.translate(0, lineHeight);
-            this.highlightPath.reset();
             i += 1;
         }
     }
@@ -350,20 +347,6 @@ public class XiView extends View {
             height = Math.max(height, this.getSuggestedMinimumHeight());
         }
 
-        Log.v("Xi", "[View] Height changed: " + height + " :: viewport: " + heightSize);
-
-        // TODO: make this a function
-        /*int linesLength = this.totalLines;//(height / this.getLineHeight()) + 2;
-        int prevLinesLength = this.lines.length;
-        if (linesLength != prevLinesLength) {
-            //Log.v("Xi", "[View] Resizing lines arr: " + this.lines.length + " -> " + linesLength);
-            //this.lines = Arrays.copyOf(this.lines, linesLength);
-            this.bridge.sendScroll(this.tab, this.firstLine, this.firstLine + this.lines.length);
-            if (linesLength > prevLinesLength) {
-                this.sendRenderLines(this.firstLine + prevLinesLength, this.firstLine + this.lines.length);
-            }
-        }*/
-
         this.setMeasuredDimension(width, height);
     }
 
@@ -371,30 +354,48 @@ public class XiView extends View {
     protected void onScrollChanged(int l, int t, int oldl, int oldt) {
         super.onScrollChanged(l, t, oldl, oldt);
 
-        Log.w("Xi", "[View] Scroll changed: " + oldl + " -> " + l + ", " + oldt + " -> " + t);
-
-        /*int prevFirstLine = this.firstLine;
-        int linesLength = this.lines.length;
         int lineHeight = this.getLineHeight();
+        int linesLength = this.lines.length;
+        int prevFirstLine = this.firstLine;
         this.firstLine = t / lineHeight;
-        Log.w("Xi", this.firstLine + " " + prevFirstLine);
         if (this.firstLine > prevFirstLine) {
             int diff = this.firstLine - prevFirstLine;
             for (int i = diff; i < linesLength; i++) {
                 this.lines[i - diff] = this.lines[i];
             }
+            this.cursorLine -= diff;
             this.sendRenderLines(prevFirstLine + linesLength, this.firstLine + linesLength);
             this.bridge.sendScroll(this.tab, this.firstLine, this.firstLine + linesLength);
         } else if (this.firstLine < prevFirstLine) {
             int diff = prevFirstLine - this.firstLine;
-            for (int i = linesLength - diff; i >= 0; i--) {
+            for (int i = linesLength - diff - 1; i >= 0; i--) {
                 this.lines[i + diff] = this.lines[i];
             }
+            this.cursorLine += diff;
             this.sendRenderLines(this.firstLine, prevFirstLine);
             this.bridge.sendScroll(this.tab, this.firstLine, this.firstLine + linesLength);
         }
-        this.yOffset = this.firstLine * lineHeight - t;
-        this.invalidate();*/
+        this.yOffset = this.firstLine * lineHeight - t; // TODO: round?
+        this.invalidate();
+    }
+
+    @Override
+    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
+
+        if (this.bridge == null) {
+            return;
+        }
+
+        int linesLength = h / this.getLineHeight() + 2;
+        int prevLinesLength = this.lines.length;
+        if (linesLength != prevLinesLength) {
+            this.lines = Arrays.copyOf(this.lines, linesLength);
+            this.bridge.sendScroll(this.tab, this.firstLine, this.firstLine + this.lines.length);
+            if (linesLength > prevLinesLength) {
+                this.sendRenderLines(this.firstLine + prevLinesLength, this.firstLine + this.lines.length);
+            }
+        }
     }
 
     private Point getLinesPosition(float x, float y) {
