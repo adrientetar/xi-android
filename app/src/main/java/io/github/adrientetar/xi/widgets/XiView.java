@@ -94,6 +94,8 @@ public class XiView extends View {
         this(context, attrs, defStyleAttr); // TODO: defStyleRes
     }
 
+    //
+
     public void activateBridge(XiBridge bridge, String tab) {
         this.bridge = bridge;
         this.bridge.setUpdateListener(new XiBridge.OnUpdateListener() {
@@ -212,70 +214,23 @@ public class XiView extends View {
         this.invalidate();
     }
 
-    @Override
-    public boolean onKeyDown(int keyCode, KeyEvent event) {
-        String command = null;
-        String suffix = event.hasModifiers(KeyEvent.META_SHIFT_ON) ? "_and_modify_selection" : "";
-        switch (keyCode) {
-            case KeyEvent.KEYCODE_ENTER:
-                command = "insert_newline";
-                break;
-            case KeyEvent.KEYCODE_DEL:
-                command = "delete_backward";
-                break;
-            case KeyEvent.KEYCODE_FORWARD_DEL:
-                command = "delete_forward";
-                break;
-            case KeyEvent.KEYCODE_TAB:
-                command = "insert_tab";
-                break;
-            case KeyEvent.KEYCODE_DPAD_UP:
-                command = "move_up" + suffix;
-                break;
-            case KeyEvent.KEYCODE_DPAD_RIGHT:
-                command = "move_right" + suffix;
-                break;
-            case KeyEvent.KEYCODE_DPAD_DOWN:
-                command = "move_down" + suffix;
-                break;
-            case KeyEvent.KEYCODE_DPAD_LEFT:
-                command = "move_left" + suffix;
-                break;
-            case KeyEvent.KEYCODE_PAGE_UP:
-                command = "page_up" + suffix;
-                break;
-            case KeyEvent.KEYCODE_PAGE_DOWN:
-                command = "page_down" + suffix;
+    private void sendRenderLines(int firstLine, int lastLine) {
+        firstLine = Math.max(firstLine, this.firstLine);
+        lastLine = Math.min(lastLine, this.firstLine + this.lines.length);
+        if (firstLine == lastLine) {
+            return;
         }
-        if (command != null) {
-            this.bridge.sendEdit(this.tab, command);
-            return true;
-        } else {
-            Editable text = new SpannableStringBuilder("");
-            return this.listener.onKeyDown(this, text, keyCode, event);
-        }
+        final int f = firstLine;
+        XiBridge.ResponseHandler handler = new XiBridge.ResponseHandler() {
+            @Override
+            public void invoke(Object result) {
+                XiView.this.updateLines(f, (JSONArray) result);
+            }
+        };
+        this.bridge.sendRenderLines(this.tab, firstLine, lastLine, handler);
     }
-    // onKeyMultiple
 
-
-    @Override
-    public boolean onTouchEvent(MotionEvent event) {
-        boolean handled;
-        boolean superResult = super.onTouchEvent(event);
-
-        if (this.hasFocus()) {
-            // XXX: do it
-            this.getLinesPosition(event.getX(), event.getY());
-            handled = true;
-        } else {
-            this.requestFocus();
-            this.requestFocusFromTouch();
-            final InputMethodManager imm = (InputMethodManager) this.getContext(
-                ).getSystemService(Context.INPUT_METHOD_SERVICE);
-            handled = imm != null && imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT);
-        }
-        return handled || superResult;
-    }
+    //
 
     @Override
     protected void onDraw(Canvas canvas) {
@@ -398,6 +353,71 @@ public class XiView extends View {
         }
     }
 
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        String command = null;
+        String suffix = event.hasModifiers(KeyEvent.META_SHIFT_ON) ? "_and_modify_selection" : "";
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_ENTER:
+                command = "insert_newline";
+                break;
+            case KeyEvent.KEYCODE_DEL:
+                command = "delete_backward";
+                break;
+            case KeyEvent.KEYCODE_FORWARD_DEL:
+                command = "delete_forward";
+                break;
+            case KeyEvent.KEYCODE_TAB:
+                command = "insert_tab";
+                break;
+            case KeyEvent.KEYCODE_DPAD_UP:
+                command = "move_up" + suffix;
+                break;
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                command = "move_right" + suffix;
+                break;
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                command = "move_down" + suffix;
+                break;
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+                command = "move_left" + suffix;
+                break;
+            case KeyEvent.KEYCODE_PAGE_UP:
+                command = "page_up" + suffix;
+                break;
+            case KeyEvent.KEYCODE_PAGE_DOWN:
+                command = "page_down" + suffix;
+        }
+        if (command != null) {
+            this.bridge.sendEdit(this.tab, command);
+            return true;
+        } else {
+            Editable text = new SpannableStringBuilder("");
+            return this.listener.onKeyDown(this, text, keyCode, event);
+        }
+    }
+    // onKeyMultiple
+
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        boolean handled;
+        boolean superResult = super.onTouchEvent(event);
+
+        if (this.hasFocus()) {
+            // XXX: do it
+            this.getLinesPosition(event.getX(), event.getY());
+            handled = true;
+        } else {
+            this.requestFocus();
+            this.requestFocusFromTouch();
+            final InputMethodManager imm = (InputMethodManager) this.getContext(
+                    ).getSystemService(Context.INPUT_METHOD_SERVICE);
+            handled = imm != null && imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT);
+        }
+        return handled || superResult;
+    }
+
     private Point getLinesPosition(float x, float y) {
         int line = (int)((y - this.yOffset) / this.getLineHeight()) + this.firstLine;
         int column = 0;//this.lines[line-this.firstLine].x_to_index(x);
@@ -406,21 +426,5 @@ public class XiView extends View {
 
     public int getLineHeight() {
         return this.textPaint.getFontMetricsInt(null);
-    }
-
-    private void sendRenderLines(int firstLine, int lastLine) {
-        firstLine = Math.max(firstLine, this.firstLine);
-        lastLine = Math.min(lastLine, this.firstLine + this.lines.length);
-        if (firstLine == lastLine) {
-            return;
-        }
-        final int f = firstLine;
-        XiBridge.ResponseHandler handler = new XiBridge.ResponseHandler() {
-            @Override
-            public void invoke(Object result) {
-                XiView.this.updateLines(f, (JSONArray) result);
-            }
-        };
-        this.bridge.sendRenderLines(this.tab, firstLine, lastLine, handler);
     }
 }
