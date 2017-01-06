@@ -6,21 +6,23 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
-import android.graphics.Point;
 import android.graphics.Typeface;
 import android.os.Build;
+import android.os.SystemClock;
 import android.support.annotation.Nullable;
 import android.support.v4.content.ContextCompat;
 import android.text.Editable;
 import android.text.Layout;
-import android.text.Selection;
 import android.text.SpannableString;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.StaticLayout;
 import android.text.TextPaint;
 import android.text.method.TextKeyListener;
+import android.text.style.BackgroundColorSpan;
 import android.text.style.ForegroundColorSpan;
+import android.text.style.StyleSpan;
+import android.text.style.UnderlineSpan;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.util.TypedValue;
@@ -51,13 +53,16 @@ public class XiView extends View {
     private int firstLine = 0;
     private StaticLayout[] lines = {};
     private int totalLines = 0;
-    private int cursorLine = 0;
-    private SpannableString cursorText;
-    private float yOffset = 0;
+    private TextPosition cursorPos;
+    private int yOffset = 0;
     // Drawing
     private final Paint highlightPaint;
     private final TextPaint textPaint;
     private Path highlightPath;
+    // Editor
+    static final int BLINK = 500;
+    private long showCursor = -1;
+    private Blink blink;
 
     public XiView(Context context) {
         this(context, null);
@@ -70,14 +75,17 @@ public class XiView extends View {
     public XiView(Context context, @Nullable AttributeSet attrs, int defStyleAttr) {
         super(context, attrs, defStyleAttr);
         this.setFocusable(true);
+        this.setFocusableInTouchMode(true);
         this.setVerticalScrollBarEnabled(true);
+
+        this.cursorPos = new TextPosition(0, 0);
 
         this.textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         this.textPaint.density = this.getResources().getDisplayMetrics().density;
         this.textPaint.setColor(Color.BLACK);
         this.textPaint.setTextAlign(Paint.Align.LEFT);
         this.textPaint.setTextSize((int) TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_SP, 20, this.getResources().getDisplayMetrics()));
+                TypedValue.COMPLEX_UNIT_SP, 19, this.getResources().getDisplayMetrics()));
         this.textPaint.setTypeface(Typeface.MONOSPACE);
 
         this.highlightPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -86,7 +94,7 @@ public class XiView extends View {
 
         this.highlightPath = new Path();
 
-        this.lines = new StaticLayout[this.getHeight() / this.getLineHeight() + 2]; // TODO: init to null
+        this.lines = new StaticLayout[this.getHeight() / this.getLineHeight() + 2];
     }
 
     @TargetApi(Build.VERSION_CODES.LOLLIPOP)
@@ -156,12 +164,9 @@ public class XiView extends View {
     private void updateLines(int firstLine, JSONArray lines) {
         int start = Math.max(this.firstLine, firstLine);
         int end = Math.min(this.firstLine + this.lines.length, firstLine + lines.length());
-        int selStart = -1;
-        int selEnd = -1;
         int wantWidth = this.getWidth();
         SpannableStringBuilder builder = new SpannableStringBuilder();
         SpannableString text;
-        this.cursorLine = -1;
         for (int i = start; i < end; i++) {
             try {
                 JSONArray line = lines.getJSONArray(i - firstLine);
@@ -170,24 +175,49 @@ public class XiView extends View {
                     JSONArray annotation = line.getJSONArray(j);
                     switch (annotation.getString(0)) {
                         case "cursor":
-                            if (selEnd != -1) {
-                                Log.w("Xi", "selStart is set " + (selEnd == annotation.getInt(1)));
-                            } else {
-                                this.cursorLine = i - start;
-                                selEnd = annotation.getInt(1);
-                            }
+                            this.cursorPos.line = i;
+                            this.cursorPos.column = annotation.getInt(1);
                             break;
                         case "fg":
                             builder.setSpan(
                                     new ForegroundColorSpan(annotation.getInt(3)),
                                     annotation.getInt(1),
                                     annotation.getInt(2),
-                                    Spanned.SPAN_INCLUSIVE_INCLUSIVE
+                                    Spanned.SPAN_INCLUSIVE_EXCLUSIVE
                             );
+                            int fontStyle = annotation.getInt(4);
+                            if ((fontStyle & 1) != 0) {
+                                builder.setSpan(
+                                    new StyleSpan(Typeface.BOLD),
+                                    annotation.getInt(1),
+                                    annotation.getInt(2),
+                                    Spanned.SPAN_INCLUSIVE_EXCLUSIVE
+                                );
+                            }
+                            if ((fontStyle & 2) != 0) {
+                                builder.setSpan(
+                                    new UnderlineSpan(),
+                                    annotation.getInt(1),
+                                    annotation.getInt(2),
+                                    Spanned.SPAN_INCLUSIVE_EXCLUSIVE
+                                );
+                            }
+                            if ((fontStyle & 4) != 0) {
+                                builder.setSpan(
+                                    new StyleSpan(Typeface.ITALIC),
+                                    annotation.getInt(1),
+                                    annotation.getInt(2),
+                                    Spanned.SPAN_INCLUSIVE_EXCLUSIVE
+                                );
+                            }
                             break;
                         case "sel":
-                            selStart = annotation.getInt(1);
-                            selEnd = annotation.getInt(2);
+                            builder.setSpan(
+                                new BackgroundColorSpan(this.highlightPaint.getColor()),
+                                annotation.getInt(1),
+                                annotation.getInt(2),
+                                Spanned.SPAN_INCLUSIVE_EXCLUSIVE
+                            );
                             break;
                     }
                 }
@@ -196,20 +226,10 @@ public class XiView extends View {
                 e.printStackTrace();
                 return;
             }
-            if (selStart == -1) {
-                selStart = selEnd;
-            }
-            if (selEnd != -1) {
-                Selection.setSelection(builder, selStart, selEnd);
-            }
             text = SpannableString.valueOf(builder);
             this.lines[i-this.firstLine] = new StaticLayout(
                     text, this.textPaint, wantWidth, Layout.Alignment.ALIGN_NORMAL, 1, 0, false);
-            if (this.cursorLine == (i - start)) {
-                this.cursorText = text;
-            }
             builder.clear();
-            selStart = selEnd = -1;
         }
         this.invalidate();
     }
@@ -244,26 +264,11 @@ public class XiView extends View {
         int lineHeight = this.getLineHeight();
         int i = 0;
         for (StaticLayout layout: this.lines) {
-            if (layout == null) {
-                i += 1;
-                continue;
+            if (layout != null) {
+                this.makeCursorPath(i);
+                layout.draw(canvas, this.highlightPath, this.highlightPaint, 0);
+                canvas.translate(0, lineHeight);
             }
-            if (i == this.cursorLine) {
-                int selStart = Selection.getSelectionStart(this.cursorText);
-                // TODO: make a function for this
-                // XXX: selection doesn't necessarily happen only on the cursor line
-                int selEnd = Selection.getSelectionEnd(this.cursorText);
-                if (selStart == selEnd) {
-                    this.highlightPaint.setStyle(Paint.Style.STROKE);
-                } else {
-                    this.highlightPaint.setStyle(Paint.Style.FILL);
-                }
-                layout.getCursorPath(selStart, this.highlightPath, this.cursorText);
-            } else {
-                this.highlightPath.reset();
-            }
-            layout.draw(canvas, this.highlightPath, this.highlightPaint, 0);
-            canvas.translate(0, lineHeight);
             i += 1;
         }
     }
@@ -318,7 +323,6 @@ public class XiView extends View {
             for (int i = diff; i < linesLength; i++) {
                 this.lines[i - diff] = this.lines[i];
             }
-            this.cursorLine -= diff;
             this.sendRenderLines(prevFirstLine + linesLength, this.firstLine + linesLength);
             this.bridge.sendScroll(this.tab, this.firstLine, this.firstLine + linesLength);
         } else if (this.firstLine < prevFirstLine) {
@@ -326,11 +330,10 @@ public class XiView extends View {
             for (int i = linesLength - diff - 1; i >= 0; i--) {
                 this.lines[i + diff] = this.lines[i];
             }
-            this.cursorLine += diff;
             this.sendRenderLines(this.firstLine, prevFirstLine);
             this.bridge.sendScroll(this.tab, this.firstLine, this.firstLine + linesLength);
         }
-        this.yOffset = this.firstLine * lineHeight - t; // TODO: round?
+        this.yOffset = Math.round(this.firstLine * lineHeight - t);
         this.invalidate();
     }
 
@@ -398,33 +401,146 @@ public class XiView extends View {
     }
     // onKeyMultiple
 
-
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        boolean handled;
+        final int action = event.getActionMasked();
+        boolean handled = false;
         boolean superResult = super.onTouchEvent(event);
 
-        if (this.hasFocus()) {
-            // XXX: do it
-            this.getLinesPosition(event.getX(), event.getY());
+        final InputMethodManager imm = (InputMethodManager) this.getContext(
+                ).getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm.isActive(this)) {
+            TextPosition loc;
+            switch (action) {
+                case MotionEvent.ACTION_DOWN:
+                    loc = this.getTextPosition(event.getX(), event.getY());
+                    if (loc != null) {
+                        this.bridge.sendClick(tab, loc.line, loc.column, 0, 1);
+                    }
+                    break;
+                case MotionEvent.ACTION_MOVE:
+                    loc = this.getTextPosition(event.getX(), event.getY());
+                    if (loc != null) {
+                        this.bridge.sendDrag(tab, loc.line, loc.column, 0);
+                    }
+                    break;
+            }
             handled = true;
-        } else {
-            this.requestFocus();
-            this.requestFocusFromTouch();
-            final InputMethodManager imm = (InputMethodManager) this.getContext(
-                    ).getSystemService(Context.INPUT_METHOD_SERVICE);
-            handled = imm != null && imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT);
+        }
+        if (action == MotionEvent.ACTION_UP && this.isFocused()) {
+            imm.viewClicked(this);
+            handled = imm.showSoftInput(this, 0);
+            if (handled) {
+                this.makeBlink();
+            }
         }
         return handled || superResult;
     }
 
-    private Point getLinesPosition(float x, float y) {
-        int line = (int)((y - this.yOffset) / this.getLineHeight()) + this.firstLine;
-        int column = 0;//this.lines[line-this.firstLine].x_to_index(x);
-        return new Point(line, column);
+    @Override
+    public void onWindowFocusChanged(boolean hasWindowFocus) {
+        super.onWindowFocusChanged(hasWindowFocus);
+
+        if (this.blink != null) {
+            if (hasWindowFocus) {
+                this.blink.uncancel();
+                this.makeBlink();
+            } else {
+                this.blink.cancel();
+            }
+        }
     }
+
+    //
 
     public int getLineHeight() {
         return this.textPaint.getFontMetricsInt(null);
+    }
+
+    public void invalidateCursorPath() {
+        // TODO: invalidate cursor path only
+        this.invalidate();
+    }
+
+    private void makeCursorPath(int line) {
+        this.highlightPath.reset();
+
+        // convert cursor line from "actual" line to "tile" line
+        int cursorLine = this.cursorPos.line - this.firstLine;
+        if (!this.hasFocus() || line != cursorLine) {
+            return;
+        }
+
+        if (this.showCursor == -1) {
+            this.showCursor = SystemClock.uptimeMillis();
+        }
+        if ((SystemClock.uptimeMillis() - this.showCursor) % (2 * BLINK) < BLINK) {
+            if (cursorLine >= this.lines.length || this.lines[cursorLine] == null) {
+                return;
+            }
+            StaticLayout layout = this.lines[cursorLine];
+            float x = layout.getPrimaryHorizontal(this.cursorPos.column);
+            int top = layout.getLineTop(0);
+            int bottom = layout.getLineBottom(0);
+            this.highlightPath.moveTo(x, top);
+            this.highlightPath.lineTo(x, bottom);
+        }
+    }
+
+    private void makeBlink() {
+        this.showCursor = SystemClock.uptimeMillis();
+        if (this.blink == null) this.blink = new Blink();
+        this.removeCallbacks(this.blink);
+        this.postDelayed(this.blink, BLINK);
+    }
+
+    private class Blink implements Runnable {
+        private boolean cancelled;
+
+        public void run() {
+            if (this.cancelled) {
+                return;
+            }
+            XiView.this.removeCallbacks(this);
+            //
+            XiView.this.invalidateCursorPath();
+            XiView.this.postDelayed(this, BLINK);
+        }
+        void cancel() {
+            if (!this.cancelled) {
+                XiView.this.removeCallbacks(this);
+                this.cancelled = true;
+            }
+        }
+        void uncancel() {
+            this.cancelled = false;
+        }
+    }
+
+
+    private TextPosition getTextPosition(float x, float y) {
+        int line = (int)((y - this.yOffset) / this.getLineHeight()) + this.firstLine;
+        //
+        if (line-this.firstLine >= this.lines.length) {
+            line = Math.max(this.firstLine + this.lines.length - 1, this.firstLine);
+        } else if (line-this.firstLine < 0) {
+            line = 0;
+        }
+        //
+        if (line-this.firstLine >= this.lines.length || this.lines[line-this.firstLine] == null) {
+            return null;
+        }
+        int column = this.lines[line-this.firstLine].getOffsetForHorizontal(0, x);
+        return new TextPosition(line, column);
+    }
+
+    private class TextPosition {
+        int line;
+        int column;
+
+        TextPosition(int line, int column) {
+            this.line = line;
+            this.column = column;
+        }
     }
 }

@@ -148,7 +148,13 @@ public class XiBridge {
     }
 
     public void finish() {
-        this.process.destroy();
+        //this.process.destroy();
+        try {
+            // stdin <-> OutputStream as the OutputStream writes into the Process' stdin.
+            this.process.getOutputStream().close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
         this.watcher.interrupt();
     }
 
