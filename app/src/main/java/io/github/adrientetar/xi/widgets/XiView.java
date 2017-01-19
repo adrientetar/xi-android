@@ -166,7 +166,6 @@ public class XiView extends View {
         int end = Math.min(this.firstLine + this.lines.length, firstLine + lines.length());
         int wantWidth = this.getWidth();
         SpannableStringBuilder builder = new SpannableStringBuilder();
-        SpannableString text;
         for (int i = start; i < end; i++) {
             try {
                 JSONArray line = lines.getJSONArray(i - firstLine);
@@ -226,9 +225,9 @@ public class XiView extends View {
                 e.printStackTrace();
                 return;
             }
-            text = SpannableString.valueOf(builder);
             this.lines[i-this.firstLine] = new StaticLayout(
-                    text, this.textPaint, wantWidth, Layout.Alignment.ALIGN_NORMAL, 1, 0, false);
+                    SpannableString.valueOf(builder), this.textPaint, wantWidth,
+                    Layout.Alignment.ALIGN_NORMAL, 1, 0, false);
             builder.clear();
         }
         this.invalidate();
@@ -288,6 +287,9 @@ public class XiView extends View {
         } else {
             width = 0;
             for (StaticLayout layout : this.lines) {
+                if (layout == null) {
+                    continue;
+                }
                 width = Math.max(width, layout.getWidth());
             }
 
@@ -480,6 +482,9 @@ public class XiView extends View {
             }
             StaticLayout layout = this.lines[cursorLine];
             float x = layout.getPrimaryHorizontal(this.cursorPos.column);
+            if (x < .5f) {
+                x = .5f;
+            }
             int top = layout.getLineTop(0);
             int bottom = layout.getLineBottom(0);
             this.highlightPath.moveTo(x, top);

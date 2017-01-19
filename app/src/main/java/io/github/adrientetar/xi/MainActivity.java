@@ -22,24 +22,5 @@ public class MainActivity extends AppCompatActivity {
                 view.activateBridge(bridge, (String) result);
             }
         });
-        this.bridge.activateWatcher();
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        this.bridge.activateWatcher();
-    }
-
-    @Override
-    protected void onPause() {
-        super.onPause();
-        this.bridge.deactivateWatcher();
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        this.bridge.finish();
     }
 }

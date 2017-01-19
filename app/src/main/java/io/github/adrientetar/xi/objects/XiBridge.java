@@ -23,8 +23,6 @@ import java.io.OutputStreamWriter;
  * Bridge that spawns a xi-core process and provides a comm interface.
  *
  * The RPC APIs are similar to those of xi-gtk CoreConnection.
- *
- * Make sure to call activateWatcher() to start listening to xi-core stdout.
  */
 
 public class XiBridge {
@@ -37,7 +35,7 @@ public class XiBridge {
     private BufferedWriter writer;
     // Bridge to polling thread
     private Handler handler;
-    private WatcherThread watcher;
+    private Thread watcher;
 
     // App interfaces
 
@@ -72,22 +70,31 @@ public class XiBridge {
         InputStream stdout = this.process.getInputStream();
 
         this.writer = new BufferedWriter(new OutputStreamWriter(stdin));
-        this.spawnInputWatcher(new BufferedReader(new InputStreamReader(stdout)));
 
-        this.handlers = new SparseArray<>();
-    }
-
-    /* Receive */
-
-    private void spawnInputWatcher(BufferedReader reader) {
         this.handler = new Handler(Looper.getMainLooper()) {
             @Override
             public void handleMessage(Message message) {
                 XiBridge.this.processMessage((String) message.obj);
             }
         };
-        this.watcher = new WatcherThread(reader, this.handler);
+        this.watcher = new WatcherThread(stdout, this.handler);
+        this.watcher.start();
+
+        Runtime.getRuntime().addShutdownHook(new Thread() {
+            public void run() {
+                try {
+                    // Xi will quit silently when stdin is closed
+                    XiBridge.this.process.getOutputStream().close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        });
+
+        this.handlers = new SparseArray<>();
     }
+
+    /* Receive */
 
     private boolean processMessage(String line) {
         try {
@@ -131,31 +138,6 @@ public class XiBridge {
             return;
         }
         this.listener.onUpdate(tab, update);
-    }
-
-    public void activateWatcher() {
-        if (this.watcher.isAlive()) {
-            return;
-        } else if (this.watcher.isInterrupted()) {
-            BufferedReader reader = this.watcher.getReader();
-            this.watcher = new WatcherThread(reader, this.handler);
-        }
-        this.watcher.start();
-    }
-
-    public void deactivateWatcher() {
-        this.watcher.interrupt();
-    }
-
-    public void finish() {
-        //this.process.destroy();
-        try {
-            // stdin <-> OutputStream as the OutputStream writes into the Process' stdin.
-            this.process.getOutputStream().close();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        this.watcher.interrupt();
     }
 
     /* Send */
@@ -326,40 +308,27 @@ public class XiBridge {
 
 class WatcherThread extends Thread {
     private BufferedReader reader;
-    private String line;
     private Handler handler;
 
-    public WatcherThread(BufferedReader reader, Handler handler) {
-        this.reader = reader;
+    public WatcherThread(InputStream is, Handler handler) {
+        this.reader = new BufferedReader(new InputStreamReader(is));
         this.handler = handler;
-    }
-
-    public BufferedReader getReader() {
-        return this.reader;
     }
 
     public void run() {
         Message message;
+        String line;
         while (!this.isInterrupted()) {
             try {
-                /* We use ready() here instead of blocking on readLine() so the thread can check
-                 * if it's getting interrupted. */
-                // XXX: this polls the shit out of the buffer and heats up CPU. find another way
-                if (this.reader.ready()) {
-                    this.line = this.reader.readLine();
-                    message = Message.obtain();
-                    message.obj = this.line;
-                    this.handler.sendMessage(message);
-                } else {
-                    this.sleep(100);
-                }
+                line = this.reader.readLine();
+                message = Message.obtain();
+                message.obj = line;
+                this.handler.sendMessage(message);
             } catch (IOException e) {
-                Log.e("Xi", "IO error in Watcher.");
-                e.printStackTrace();
-            } catch (InterruptedException e) {
+                Log.e("Xi", "[Watcher] IO error.");
                 e.printStackTrace();
             }
         }
-        Log.v("Xi", "Thread suspended!");
+        Log.v("Xi", "[Watcher] Thread suspended!");
     }
 }
