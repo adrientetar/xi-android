@@ -334,9 +334,10 @@ public class XiView extends View {
             }
             this.sendRenderLines(this.firstLine, prevFirstLine);
             this.bridge.sendScroll(this.tab, this.firstLine, this.firstLine + linesLength);
+        } else {
+            this.invalidate();
         }
         this.yOffset = Math.round(this.firstLine * lineHeight - t);
-        this.invalidate();
     }
 
     @Override
@@ -457,6 +458,13 @@ public class XiView extends View {
 
     public int getLineHeight() {
         return this.textPaint.getFontMetricsInt(null);
+    }
+
+    public String getTab() {
+        if (this.bridge == null) {
+            return null;
+        }
+        return this.tab;
     }
 
     public void invalidateCursorPath() {

@@ -1,0 +1,10 @@
+<!--?xml version="1.0" encoding="utf-8"?-->
+<menu xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item android:id="@+id/action_left_end" android:icon="@drawable/ic_left_white_24dp" android:title="@string/action_left_end" app:showAsAction="always" />
+    <item android:id="@+id/action_undo" android:icon="@drawable/ic_undo_white_24dp" android:title="@string/action_undo" app:showAsAction="always" />
+    <item android:id="@+id/action_save" android:icon="@drawable/ic_save_white_24dp" android:title="@string/action_save" app:showAsAction="always" />
+    <item android:id="@+id/action_goto" android:icon="@drawable/ic_goto_white_24dp" android:title="@string/action_goto" app:showAsAction="always" />
+    <item android:id="@+id/action_search" android:icon="@drawable/ic_search_white_24dp" android:title="@string/action_search" app:showAsAction="always" />
+    <item android:id="@+id/action_redo" android:icon="@drawable/ic_redo_white_24dp" android:title="@string/action_redo" app:showAsAction="always" />
+    <item android:id="@+id/action_right_end" android:icon="@drawable/ic_right_white_24dp" android:title="@string/action_right_end" app:showAsAction="always" />
+</menu>
